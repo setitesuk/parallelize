@@ -5,40 +5,101 @@ use 5.010_000;
 use warnings;
 use strict;
 
-use autodie qw(:system);
 use version;
+use autodie qw(:system :file);
 
-use File::Temp;
+use Cwd;
+use File::Spec;
 
 use Moose;
-use Moose::Util::TypeConstraints;
 
-our $VERSION = qv('0.0.1');
+#use Moose::Util::TypeConstraints;
+
+our $VERSION = qv('0.1.0');
 
 # Module implementation here
 
 # Should create a type constraint on this attribute
 has 'data' => (
-
+    is         => 'ro',
+    isa        => 'ArrayRef[Str]',
+    required   => 1,
+    auto_deref => 1,
 );
 
+# File to be passed to bsub - job-array-file
+# NOTE: Naming convention here sounds wrong. I want exec[utable]
+# to be a user specified (perhaps one you wrote two weeks ago)
+# stand-alone script as opposed to the job-array-file.
+# In essence, you should either have an executable file (for
+# one-liners) or code in a HERE_DOC within a file.
 has 'exec' => (
-
+    is      => 'rw',
+    default => sub {
+        File::Spec->catfile( cwd, '.parallelize' );
+    },
 );
 
-has 'code' => (
+# Perhaps I should define users-code-file here??
 
+# Need a coersion here to make [<DATA>] and sub { ... }
+# valid argument to new( code => '' ).
+has 'code' => (
+    is     => 'ro',
+    isa    => 'Str',
+    writer => 'set_code',
 );
 
 sub BUILD {
-  my ( $self, $params ) = @_;
+    my ( $self, $params ) = @_;
+
+    # Set the code if you have one
+    if ( $params->{code} ) {
+        $self->set_code( $params->{code} );
+    }
+
+    # Write the code to a temporary file
+    my $code_file = File::Spec->catfile( cwd, '.users-code' );
+
+    open my $code_handle, '>', $code_file;
+
+    print {$code_handle} $self->code();
+
+    # Check that it compiles ...
+    # NOTE: Would like to silence the output of this.
+    # Perhaps we can use string form of eval?? Would prefer
+    # IPC::System::Simple::capture() for this.
+    system("perl -c $code_file");
+
+    # Execute the commands on each file
+    open my $exec_handle, '>', $self->exec();
+
+    for my $file ( $self->data ) {
+        say {$exec_handle} "perl $code_file $file";
+    }
+
+    close($_) for $exec_handle, $code_handle;
+
+    # Now submit the jobs to the farm as a job array
+    # NOTE:
+    # Here's where the bsubs will be. Perhaps this should be
+    # a separate function Parallelize::run() or something like
+    # that? Ps: Only cat seems to work here ... source doesn't.
+    system( 'cat', $self->exec );
+
+    return $self;
 }
+
+# NOTE:
+# Don't forget to remove the files created when everything's
+# finished. Perhaps you can try File::Temp again with UNLINK
+# set to true.
 
 __PACKAGE__->meta->make_immutable;
 
 no Moose;
 
-1; # Magic true value required at end of module
+1;    # Magic true value required at end of module
 
 __END__
 
@@ -56,9 +117,17 @@ This document describes Parallelize version 0.0.1
 
     use Parallelize;
 
+    my $data = [qw(A B C)];
+    my $code = <<'END_CODE';
+    #! /usr/bin/env perl
+    use 5.010;
+    say 'This is a test: ', shift;
+    exit 0;
+    END_CODE
+
     my $parallelize = Parallelize->new(
-        data => \@ARGV,
-        code => $code,   # ideally \*DATA
+        data => $data,
+        code => $code,   # ideally [<DATA>]
         exec => $script, # preferably ...
     );
 

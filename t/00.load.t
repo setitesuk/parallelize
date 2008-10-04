@@ -1,7 +1,7 @@
 use Test::More tests => 1;
 
 BEGIN {
-use_ok( 'Parallelize' );
+    use_ok('Parallelize');
 }
 
-diag( "Testing Parallelize $Parallelize::VERSION" );
+diag("Testing Parallelize $Parallelize::VERSION");
