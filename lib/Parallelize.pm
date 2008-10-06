@@ -13,13 +13,13 @@ use File::Spec;
 
 use Moose;
 use Moose::Util::TypeConstraints;
-use IPC::System::Simple qw(capture);
+use IPC::System::Simple qw(capture $EXITVAL EXIT_ANY);
 
-our $VERSION = qv('0.1.1');
+our $VERSION = qv('0.1.2');
 
 # Module implementation here
 
-# Should create a type constraint on this attribute
+# Define attribute files:
 subtype 'ExistingFile'
   => as 'Str'
   => where { -e };
@@ -31,36 +31,47 @@ has 'files' => (
     auto_deref => 1,
 );
 
-# File to be passed to bsub - job-array-file
-# NOTE: Naming convention here sounds wrong. I want exec[utable]
-# to be a user specified (perhaps one you wrote two weeks ago)
-# stand-alone script as opposed to the job-array-file.
-# In essence, you should either have an executable file (for
-# one-liners) or code in a HERE_DOC within a file.
-has 'exec' => (
-    is      => 'rw',
-    default => sub {
-        File::Spec->catfile( cwd, '.parallelize' );
-    },
-);
-
-# Perhaps I should define users-code-file here??
-
-# Need a coersion here to make sub { ... }
-# a valid argument to new( code => '' ).
+# Define attribute code:
 subtype 'Code'
   => as 'Str'
   => where { $_ ne q{} };
 
 coerce 'Code'
   => from 'ArrayRef'
-  => via { join q{}, @{ $_ } };
+    => via { join q{}, @{ $_ } }
+# Need a coersion here to make sub { ... } a valid argument.
+#  => from 'CodeRef'
+#    => via { ... }
+;
 
 has 'code' => (
     is     => 'ro',
     isa    => 'Code',
     coerce => 1,
     writer => 'set_code',
+);
+
+# File to be passed to bsub - job-array-file
+# NOTE: Naming convention here sounds wrong. I want exec[utable]
+# to be a user specified (perhaps one you wrote two weeks ago)
+# stand-alone script as opposed to the job-array-file.
+# In essence, you should either have an executable file (for
+# one-liners) or code in a HERE_DOC within a file.
+# exec should be an alternative to .users-code
+has 'exec_file' => (
+    is      => 'rw',
+    default => sub {
+        File::Spec->catfile( cwd, '.users-code' );
+    },
+);
+
+# Define a jobs_file attribute:
+has 'jobs_file' => (
+    is => 'rw',
+    isa => 'Str',
+    default => sub {
+        File::Spec->catfile( cwd, '.parallelize' );
+    },
 );
 
 sub BUILD {
@@ -72,11 +83,13 @@ sub BUILD {
     }
 
     # Write the code to a temporary file ... NEED TO REMOVE AFTERWARDS
-    my $code_file = File::Spec->catfile( cwd, '.users-code' );
+    my $code_file = $self->exec_file();
 
     open my $code_handle, '>', $code_file;
 
     print {$code_handle} $self->code();
+
+    close $code_handle;
 
     # Check that it compiles ...
     # NOTE: Would like to silence the output of this.
@@ -88,28 +101,31 @@ sub BUILD {
     }
 
     # Execute the commands on each file
-    open my $exec_handle, '>', $self->exec();
+    open my $jobs_file_handle, '>', $self->jobs_file();
 
     for my $file ( $self->files ) {
-        say {$exec_handle} "perl $code_file $file";
+        say {$jobs_file_handle} "perl $code_file $file";
     }
 
-    close($_) for $exec_handle, $code_handle;
-
-    # Now submit the jobs to the farm as a job array
-    # NOTE:
-    # Here's where the bsubs will be. Perhaps this should be
-    # a separate function Parallelize::run() or something like
-    # that? Ps: Only cat seems to work here ... source doesn't.
-    system( 'cat', $self->exec );
+    close $jobs_file_handle;
 
     return $self;
+}
+
+# Now submit the jobs to the farm as a job array (can pass bsub arguments here)
+sub run {
+    my ( $self, %args ) = @_;
+    system( 'cat', $self->jobs_file );
 }
 
 # NOTE:
 # Don't forget to remove the files created when everything's
 # finished. Perhaps you can try File::Temp again with UNLINK
 # set to true.
+#sub DEMOLISH {
+#    my ($self) = @_;
+#    unlink $self->exec_file # ... etc
+#}
 
 __PACKAGE__->meta->make_immutable;
 
@@ -144,7 +160,7 @@ This document describes Parallelize version 0.0.1
     my $parallelize = Parallelize->new(
         data => $data,
         code => $code,   # ideally [<DATA>]
-        exec => $script, # preferably ...
+        jobs_file => $script, # preferably ...
     );
 
     exit 0;
