@@ -12,7 +12,7 @@ use Test::More qw(no_plan);
 
 use_ok('Parallelize') or exit;
 
-my $data = [qw(A B C)];
+my $data = [ glob "$Bin/../data/*.txt" ];
 my $code = <<'END_CODE';
 #! /usr/bin/env perl
 use 5.010;
@@ -21,29 +21,29 @@ exit 0;
 END_CODE
 
 my $foo = Parallelize->new(
-    code => $code,
-    data => $data,
+    code  => $code,
+    files => $data,
 );
 
-isa_ok( $foo, 'Parallelize' );
-
-is( $foo->code, $code, 'code is what we expect' );
-is_deeply( [ $foo->data ], $data, 'data is what we expect' );
-
-=for:
-
-Would need a coersion to make this work.
-
-my $foo = Parallelize->new(
-    code => [<DATA>],
-    data => [qw(A B C)],
+# Would need a coersion to make this work.
+my $bar = Parallelize->new(
+    code  => [<DATA>],
+    files => $data,
 );
 
-isa_ok( $foo, 'Parallelize' );
-
-=cut
+for my $object ( $foo, $bar ) {
+    isa_ok( $object, 'Parallelize' );
+    is( $object->code, $code, 'code is what we expect' );
+    is_deeply( [ $object->files ], $data, 'data is what we expect' );
+}
 
 exit 0;
+
+# Local Variables:
+#   mode: cperl
+#   cperl-indent-level: 4
+#   fill-column: 100
+# End:
 
 __END__
 #! /usr/bin/env perl

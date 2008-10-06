@@ -12,17 +12,21 @@ use Cwd;
 use File::Spec;
 
 use Moose;
+use Moose::Util::TypeConstraints;
+use IPC::System::Simple qw(capture);
 
-#use Moose::Util::TypeConstraints;
-
-our $VERSION = qv('0.1.0');
+our $VERSION = qv('0.1.1');
 
 # Module implementation here
 
 # Should create a type constraint on this attribute
-has 'data' => (
+subtype 'ExistingFile'
+  => as 'Str'
+  => where { -e };
+
+has 'files' => (
     is         => 'ro',
-    isa        => 'ArrayRef[Str]',
+    isa        => 'ArrayRef[ExistingFile]',
     required   => 1,
     auto_deref => 1,
 );
@@ -42,11 +46,20 @@ has 'exec' => (
 
 # Perhaps I should define users-code-file here??
 
-# Need a coersion here to make [<DATA>] and sub { ... }
-# valid argument to new( code => '' ).
+# Need a coersion here to make sub { ... }
+# a valid argument to new( code => '' ).
+subtype 'Code'
+  => as 'Str'
+  => where { $_ ne q{} };
+
+coerce 'Code'
+  => from 'ArrayRef'
+  => via { join q{}, @{ $_ } };
+
 has 'code' => (
     is     => 'ro',
-    isa    => 'Str',
+    isa    => 'Code',
+    coerce => 1,
     writer => 'set_code',
 );
 
@@ -58,7 +71,7 @@ sub BUILD {
         $self->set_code( $params->{code} );
     }
 
-    # Write the code to a temporary file
+    # Write the code to a temporary file ... NEED TO REMOVE AFTERWARDS
     my $code_file = File::Spec->catfile( cwd, '.users-code' );
 
     open my $code_handle, '>', $code_file;
@@ -69,12 +82,15 @@ sub BUILD {
     # NOTE: Would like to silence the output of this.
     # Perhaps we can use string form of eval?? Would prefer
     # IPC::System::Simple::capture() for this.
-    system("perl -c $code_file");
+    my $output = capture("perl -c $code_file");
+    if ( $output =~ m/\A \w+ syntax ok \z/xms ) {
+	confess "Your code does not compile: ($output)";
+    }
 
     # Execute the commands on each file
     open my $exec_handle, '>', $self->exec();
 
-    for my $file ( $self->data ) {
+    for my $file ( $self->files ) {
         say {$exec_handle} "perl $code_file $file";
     }
 
@@ -260,3 +276,11 @@ RENDERED INACCURATE OR LOSSES SUSTAINED BY YOU OR THIRD PARTIES OR A
 FAILURE OF THE SOFTWARE TO OPERATE WITH ANY OTHER SOFTWARE), EVEN IF
 SUCH HOLDER OR OTHER PARTY HAS BEEN ADVISED OF THE POSSIBILITY OF
 SUCH DAMAGES.
+
+=cut
+
+# Local Variables:
+#   mode: cperl
+#   cperl-indent-level: 4
+#   fill-column: 100
+# End:
