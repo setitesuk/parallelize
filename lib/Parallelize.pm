@@ -15,7 +15,7 @@ use Moose;
 use Moose::Util::TypeConstraints;
 use IPC::System::Simple qw(capture $EXITVAL EXIT_ANY);
 
-our $VERSION = qv('0.1.2');
+our $VERSION = qv('0.1.3');
 
 # Module implementation here
 
@@ -82,14 +82,14 @@ sub BUILD {
         $self->set_code( $params->{code} );
     }
 
-    # Write the code to a temporary file ... NEED TO REMOVE AFTERWARDS
     my $code_file = $self->exec_file();
 
-    open my $code_handle, '>', $code_file;
-
-    print {$code_handle} $self->code();
-
-    close $code_handle;
+    # Write code to .user-code if no exec_file was specified
+    if ( ! $params->{exec_file} ) {
+	open my $code_handle, '>', $code_file;
+	print {$code_handle} $self->code();
+	close $code_handle;
+    }
 
     # Check that it compiles ...
     # NOTE: Would like to silence the output of this.
