@@ -15,7 +15,7 @@ use Moose;
 use Moose::Util::TypeConstraints;
 use IPC::System::Simple qw(capture $EXITVAL EXIT_ANY);
 
-our $VERSION = qv('0.1.3');
+our $VERSION = qv('0.1.4');
 
 # Module implementation here
 
@@ -38,11 +38,11 @@ subtype 'Code'
 
 coerce 'Code'
   => from 'ArrayRef'
-    => via { join q{}, @{ $_ } }
+  => via { join q{}, @{$_} };
+
 # Need a coersion here to make sub { ... } a valid argument.
 #  => from 'CodeRef'
 #    => via { ... }
-;
 
 has 'code' => (
     is     => 'ro',
@@ -51,13 +51,7 @@ has 'code' => (
     writer => 'set_code',
 );
 
-# File to be passed to bsub - job-array-file
-# NOTE: Naming convention here sounds wrong. I want exec[utable]
-# to be a user specified (perhaps one you wrote two weeks ago)
-# stand-alone script as opposed to the job-array-file.
-# In essence, you should either have an executable file (for
-# one-liners) or code in a HERE_DOC within a file.
-# exec should be an alternative to .users-code
+# Define an exec_file attribute:
 has 'exec_file' => (
     is      => 'rw',
     default => sub {
@@ -67,8 +61,8 @@ has 'exec_file' => (
 
 # Define a jobs_file attribute:
 has 'jobs_file' => (
-    is => 'rw',
-    isa => 'Str',
+    is      => 'rw',
+    isa     => 'Str',
     default => sub {
         File::Spec->catfile( cwd, '.parallelize' );
     },
@@ -85,26 +79,34 @@ sub BUILD {
     my $code_file = $self->exec_file();
 
     # Write code to .user-code if no exec_file was specified
-    if ( ! $params->{exec_file} ) {
-	open my $code_handle, '>', $code_file;
-	print {$code_handle} $self->code();
-	close $code_handle;
+    # NOTE: The code must be defined for this bit to work ... duh!
+    if ( !$params->{exec_file} && $params->{code} ) {
+        open my $code_handle, '>', $code_file;
+        print {$code_handle} $self->code();
+        close $code_handle;
+
+	# Make it executable
+	system("chmod 0755 $code_file");
     }
 
     # Check that it compiles ...
     # NOTE: Would like to silence the output of this.
     # Perhaps we can use string form of eval?? Would prefer
     # IPC::System::Simple::capture() for this.
+    # NOTE: May have to skip this entirely if you want to
+    # allow programs written in other languages. Either that
+    # come up with something very clever ...
+    # $self->_verify_compilation( )
     my $output = capture("perl -c $code_file");
     if ( $output =~ m/\A \w+ syntax ok \z/xms ) {
-	confess "Your code does not compile: ($output)";
+        confess "Your code does not compile: ($output)";
     }
 
     # Execute the commands on each file
     open my $jobs_file_handle, '>', $self->jobs_file();
 
     for my $file ( $self->files ) {
-        say {$jobs_file_handle} "perl $code_file $file";
+        say {$jobs_file_handle} "$code_file $file";
     }
 
     close $jobs_file_handle;
@@ -115,7 +117,10 @@ sub BUILD {
 # Now submit the jobs to the farm as a job array (can pass bsub arguments here)
 sub run {
     my ( $self, %args ) = @_;
-    system( 'cat', $self->jobs_file );
+    my $jobs_file       = $self->jobs_file;
+
+    system("chmod 0755 $jobs_file");
+    system($jobs_file);
 }
 
 # NOTE:
@@ -241,16 +246,13 @@ None reported.
 
 =head1 BUGS AND LIMITATIONS
 
-=for author to fill in:
-    A list of known problems with the module, together with some
-    indication Whether they are likely to be fixed in an upcoming
-    release. Also a list of restrictions on the features the module
-    does provide: data types that cannot be handled, performance issues
-    and the circumstances in which they may arise, practical
-    limitations on the size of data sets, special cases that are not
-    (yet) handled, etc.
+=over 4
 
-No bugs have been reported.
+=item IPC::System::Simple::system()
+
+Currently this requires me to stringify the command ... "$command"
+
+=back
 
 Please report any bugs or feature requests to
 C<bug-parallelize@rt.cpan.org>, or through the web interface at
