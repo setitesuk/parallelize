@@ -8,14 +8,14 @@ use strict;
 use version;
 use autodie qw(:system :file);
 
-use Cwd;
+use Cwd qw(cwd abs_path);
 use File::Spec;
 
 use Moose;
 use Moose::Util::TypeConstraints;
 use IPC::System::Simple qw(capture $EXITVAL EXIT_ANY);
 
-our $VERSION = qv('0.1.4');
+our $VERSION = qv('0.1.5');
 
 # Module implementation here
 
@@ -41,6 +41,7 @@ coerce 'Code'
   => via { join q{}, @{$_} };
 
 # Need a coersion here to make sub { ... } a valid argument.
+# Consider using Storage or Data::Dumper for this.
 #  => from 'CodeRef'
 #    => via { ... }
 
@@ -71,6 +72,12 @@ has 'jobs_file' => (
 sub BUILD {
     my ( $self, $params ) = @_;
 
+    # Make sure you have files to play with ...
+    # A nicer error message perhaps =)
+    if ( scalar @{ $params->{files} } == 0 ) {
+	confess 'Please specify the files you wish to work on'
+    }
+
     # Set the code if you have one
     if ( $params->{code} ) {
         $self->set_code( $params->{code} );
@@ -85,8 +92,8 @@ sub BUILD {
         print {$code_handle} $self->code();
         close $code_handle;
 
-	# Make it executable
-	system("chmod 0755 $code_file");
+        # Make it executable
+        system("chmod 0755 $code_file");
     }
 
     # Check that it compiles ...
@@ -99,17 +106,21 @@ sub BUILD {
     # $self->_verify_compilation( )
     my $output = capture("perl -c $code_file");
     if ( $output =~ m/\A \w+ syntax ok \z/xms ) {
-        confess "Your code does not compile: ($output)";
+	confess "Your code does not compile: ($output)";
     }
 
     # Execute the commands on each file
     open my $jobs_file_handle, '>', $self->jobs_file();
 
     for my $file ( $self->files ) {
-        say {$jobs_file_handle} "$code_file $file";
+        say {$jobs_file_handle} abs_path($code_file) . q{ } . $file;
     }
 
     close $jobs_file_handle;
+
+    # Make the jobs file executable
+    my $jobs_file = $self->jobs_file;
+    system("chmod 0755 $jobs_file");
 
     return $self;
 }
@@ -117,11 +128,10 @@ sub BUILD {
 # Now submit the jobs to the farm as a job array (can pass bsub arguments here)
 sub run {
     my ( $self, %args ) = @_;
-    my $jobs_file       = $self->jobs_file;
 
-    system("chmod 0755 $jobs_file");
-    system($jobs_file);
+    system($self->jobs_file);
 }
+
 
 # NOTE:
 # Don't forget to remove the files created when everything's
@@ -250,7 +260,8 @@ None reported.
 
 =item IPC::System::Simple::system()
 
-Currently this requires me to stringify the command ... "$command"
+Currently this requires me to stringify the command ... "$command". Look into
+other means of running system commands that don't require this.
 
 =back
 

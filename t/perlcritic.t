@@ -8,7 +8,7 @@ use warnings;
 use FindBin qw($Bin);
 use lib qq($Bin/../lib);
 
-use Test::More qw(no_plan);
+use Test::More;
 
 if ( !require Test::Perl::Critic ) {
     Test::More::plan(
